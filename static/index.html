@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#000000" />
+<title>REEL / Thumbnail Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ==========================================================
+     DESIGN TOKENS
+     Primary brand: void / surface / cyan / violet / white
+     Semantic (kept separate from brand): rec (live/error), ok (success)
+     ========================================================== */
+  :root{
+    --void:#000000;
+    --surface:#111111;
+    --surface-glass: rgba(17,17,17,0.55);
+    --surface-glass-strong: rgba(17,17,17,0.82);
+    --surface-raised: rgba(255,255,255,0.055);
+    --line: rgba(255,255,255,0.10);
+    --line-strong: rgba(255,255,255,0.20);
+    --cyan:#00E5FF;
+    --violet:#8A2BE2;
+    --white:#FFFFFF;
+    --text:#F5F7FA;
+    --text-dim: rgba(245,247,250,0.60);
+    --text-faint: rgba(245,247,250,0.36);
+    --rec:#FF3B5C;
+    --ok:#00FFB2;
+    --grad-primary: linear-gradient(135deg, var(--cyan), var(--violet));
+    --grad-primary-soft: linear-gradient(135deg, rgba(0,229,255,0.14), rgba(138,43,226,0.14));
+    --grad-text: linear-gradient(100deg, #ffffff 10%, var(--cyan) 45%, var(--violet) 75%, #ffffff 95%);
+    --shadow-lift: 0 24px 64px rgba(0,0,0,0.55);
+    --shadow-soft: 0 10px 30px rgba(0,0,0,0.4);
+    --glow-cyan: 0 0 0 1px rgba(0,229,255,0.35), 0 0 28px rgba(0,229,255,0.22);
+    --glow-violet: 0 0 0 1px rgba(138,43,226,0.4), 0 0 28px rgba(138,43,226,0.24);
+    --radius: 18px;
+    --radius-sm: 10px;
+    --ease: cubic-bezier(.22,1,.36,1);
+    --ease-out: cubic-bezier(.16,1,.3,1);
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--void);
+    color:var(--text);
+    font-family:'Inter',sans-serif;
+    min-height:100vh;
+    overflow-x:hidden;
+    position:relative;
+  }
+  ::selection{background:var(--cyan); color:#000;}
+  @media (prefers-reduced-motion: reduce){
+    html{scroll-behavior:auto;}
+    *{animation-duration:0.001ms !important; animation-iteration-count:1 !important; transition-duration:0.001ms !important;}
+    .cursor-glow{display:none !important;}
+  }
+  ::-webkit-scrollbar{width:10px; height:10px;}
+  ::-webkit-scrollbar-track{background:var(--void);}
+  ::-webkit-scrollbar-thumb{background:linear-gradient(var(--cyan), var(--violet)); border-radius:10px; border:2px solid var(--void);}
+
+  .mono{font-family:'JetBrains Mono',monospace;}
+
+  /* ---------- Ambient background layers ----------
+     Static aurora/grid for now — Pass 2 mounts a Three.js
+     canvas into #bgScene in place of / behind these. */
+  .bg-scene{
+    position:fixed; inset:0; z-index:-3; pointer-events:none;
+  }
+  .bg-aurora{
+    position:fixed; inset:-10%; z-index:-2; pointer-events:none;
+    background:
+      radial-gradient(38% 32% at 18% 22%, rgba(0,229,255,0.16), transparent 70%),
+      radial-gradient(42% 38% at 82% 15%, rgba(138,43,226,0.16), transparent 70%),
+      radial-gradient(50% 40% at 50% 100%, rgba(0,229,255,0.08), transparent 70%);
+    filter:blur(40px);
+    animation: auroraDrift 22s ease-in-out infinite alternate;
+  }
+  @keyframes auroraDrift{
+    0%{ transform: translate3d(0,0,0) scale(1); }
+    100%{ transform: translate3d(1.5%,-2%,0) scale(1.06); }
+  }
+  .bg-grid{
+    position:fixed; inset:0; z-index:-2; pointer-events:none; opacity:0.35;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+    background-size:64px 64px;
+    mask-image: radial-gradient(60% 60% at 50% 20%, #000 40%, transparent 100%);
+  }
+  .cursor-glow{
+    position:fixed; top:0; left:0; width:420px; height:420px; z-index:-1;
+    pointer-events:none; will-change:transform;
+    transform:translate(-9999px,-9999px);
+    background: radial-gradient(circle, rgba(0,229,255,0.10), rgba(138,43,226,0.06) 45%, transparent 72%);
+    margin-left:-210px; margin-top:-210px;
+    transition:opacity .3s ease;
+  }
+  @media (hover:none), (pointer:coarse){ .cursor-glow{display:none;} }
+
+  /* ---------- Scroll progress ---------- */
+  .scroll-progress-track{
+    position:fixed; top:0; left:0; right:0; height:2px; z-index:200;
+    background:rgba(255,255,255,0.06);
+  }
+  .scroll-progress-bar{
+    height:100%; width:0%;
+    background:var(--grad-primary);
+    box-shadow:0 0 12px rgba(0,229,255,0.6);
+    transition:width .08s linear;
+  }
+
+  /* ---------- Layout shell ---------- */
+  .shell{max-width:1180px; margin:0 auto; padding:0 28px 100px; position:relative;}
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:20px 24px; margin:0 -24px 48px;
+    position:sticky; top:0; z-index:100;
+    border-radius:0 0 var(--radius) var(--radius);
+    border-bottom:1px solid transparent;
+    background:transparent;
+    transition:background .35s var(--ease), border-color .35s var(--ease), backdrop-filter .35s var(--ease), box-shadow .35s var(--ease);
+  }
+  body.is-scrolled .topbar{
+    background:var(--surface-glass-strong);
+    backdrop-filter:blur(18px) saturate(140%);
+    -webkit-backdrop-filter:blur(18px) saturate(140%);
+    border-bottom:1px solid var(--line);
+    box-shadow:0 12px 32px rgba(0,0,0,0.35);
+  }
+  .logo{
+    display:flex; align-items:center; gap:10px;
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700;
+    font-size:19px; letter-spacing:0.2px;
+  }
+  .logo .slash{
+    background:var(--grad-primary);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    font-weight:700;
+  }
+  .logo-sub{color:var(--text-dim); font-weight:400; font-size:13px; font-family:'Inter',sans-serif;}
+  .airpill{
+    display:flex; align-items:center; gap:8px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px; letter-spacing:1.5px; text-transform:uppercase;
+    color:var(--text-dim);
+    border:1px solid var(--line);
+    background:var(--surface-raised);
+    padding:7px 13px; border-radius:999px;
+    transition:border-color .2s ease, box-shadow .2s ease;
+  }
+  .dot{width:7px; height:7px; border-radius:50%; background:var(--text-faint); flex-shrink:0; transition:background .2s ease, box-shadow .2s ease;}
+  .dot.live{background:var(--rec); box-shadow:0 0 10px rgba(255,59,92,0.75); animation:pulse 1.6s infinite;}
+  .dot.ready{background:var(--ok); box-shadow:0 0 10px rgba(0,255,178,0.7); animation:none;}
+  @keyframes pulse{0%,100%{opacity:1;} 50%{opacity:0.35;}}
+
+  .topbar-right{display:flex; align-items:center; gap:16px;}
+  .authbox{display:flex; align-items:center; gap:12px;}
+  .who{font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-dim);}
+
+  /* ---------- Buttons / inputs ---------- */
+  input, select, textarea{
+    background:var(--surface-raised);
+    border:1px solid var(--line);
+    color:var(--text);
+    font-family:'Inter',sans-serif;
+    font-size:14.5px;
+    padding:16px 14px 8px;
+    border-radius:var(--radius-sm);
+    outline:none;
+    width:100%;
+    transition:border-color .18s ease, background .18s ease, box-shadow .18s ease;
+  }
+  input:focus, select:focus, textarea:focus{
+    border-color:var(--cyan);
+    background:rgba(0,229,255,0.05);
+    box-shadow:0 0 0 3px rgba(0,229,255,0.14);
+  }
+  input::placeholder, textarea::placeholder{color:transparent;}
+  textarea{resize:vertical; font-family:'Inter',sans-serif; min-height:88px;}
+
+  button{
+    font-family:'Inter',sans-serif;
+    font-weight:600;
+    font-size:13px;
+    border-radius:var(--radius-sm);
+    border:1px solid var(--line);
+    background:var(--surface-raised);
+    color:var(--text);
+    padding:11px 18px;
+    cursor:pointer;
+    position:relative;
+    overflow:hidden;
+    transition:transform .16s var(--ease), border-color .16s ease, background .16s ease, box-shadow .16s ease;
+  }
+  button:hover{border-color:var(--line-strong); background:rgba(255,255,255,0.09); transform:translateY(-1px);}
+  button:active{transform:translateY(0) scale(0.97);}
+  button:disabled{opacity:0.4; cursor:not-allowed; transform:none;}
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible{
+    outline:2px solid var(--cyan); outline-offset:2px;
+  }
+  .ripple{
+    position:absolute; width:8px; height:8px; border-radius:50%;
+    background:radial-gradient(circle, rgba(255,255,255,0.65), rgba(255,255,255,0) 70%);
+    transform:translate(-50%,-50%) scale(1);
+    pointer-events:none;
+    animation:rippleAnim .6s var(--ease-out) forwards;
+  }
+  @keyframes rippleAnim{ to{ transform:translate(-50%,-50%) scale(24); opacity:0; } }
+
+  .btn-ghost{background:transparent; border-color:transparent;}
+  .btn-ghost:hover{background:var(--surface-raised); border-color:var(--line);}
+
+  .btn-rec{
+    background:var(--grad-primary);
+    border-color:transparent;
+    color:#04141a;
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    font-family:'JetBrains Mono',monospace;
+    letter-spacing:1px;
+    text-transform:uppercase;
+    padding:15px 22px;
+    font-size:13px;
+    font-weight:600;
+    box-shadow:var(--glow-cyan);
+  }
+  .btn-rec:hover{
+    box-shadow:var(--glow-cyan), var(--glow-violet), 0 14px 30px rgba(0,0,0,0.4);
+    transform:translateY(-2px);
+    filter:brightness(1.06);
+  }
+  .btn-rec .recdot{width:9px; height:9px; border-radius:50%; background:#04141a;}
+  .btn-rec.loading .recdot{animation:pulse .9s infinite;}
+  .btn-rec.full{width:100%;}
+
+  /* ---------- Auth panel ---------- */
+  .authpanel{
+    background:var(--surface-glass);
+    backdrop-filter:blur(22px) saturate(160%);
+    -webkit-backdrop-filter:blur(22px) saturate(160%);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:26px;
+    max-width:420px;
+    margin:60px auto;
+    box-shadow:var(--shadow-lift);
+    animation:riseIn .5s var(--ease-out) both;
+    position:relative;
+  }
+  .authpanel::before{
+    content:''; position:absolute; inset:0; border-radius:inherit; padding:1px;
+    background:linear-gradient(160deg, rgba(0,229,255,0.35), rgba(138,43,226,0.1) 40%, transparent 70%);
+    -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor; mask-composite:exclude;
+    pointer-events:none;
+  }
+  @keyframes riseIn{
+    from{opacity:0; transform:translateY(14px);}
+    to{opacity:1; transform:translateY(0);}
+  }
+  .authpanel h2{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700;
+    font-size:21px; margin:0 0 4px;
+  }
+  .authpanel p.sub{color:var(--text-dim); font-size:13px; margin:0 0 20px;}
+  .field{margin-bottom:16px; position:relative;}
+  .field label{
+    position:absolute; left:14px; top:15px;
+    font-family:'JetBrains Mono',monospace;
+    font-size:12.5px; letter-spacing:0.3px;
+    color:var(--text-dim);
+    pointer-events:none;
+    transform-origin:left top;
+    transition:transform .16s var(--ease), color .16s ease;
+  }
+  .field textarea + label{top:16px;}
+  .field:focus-within label,
+  .field:has(input:not(:placeholder-shown)) label,
+  .field:has(textarea:not(:placeholder-shown)) label{
+    transform:translateY(-9px) scale(0.78);
+    color:var(--cyan);
+  }
+  .authtabs{display:flex; gap:6px; margin-bottom:22px; background:var(--surface-raised); padding:4px; border-radius:var(--radius-sm); border:1px solid var(--line);}
+  .authtabs button{flex:1; background:transparent; border-color:transparent;}
+  .authtabs button.active{background:var(--grad-primary); color:#04141a; box-shadow:var(--glow-cyan);}
+  .authmsg{font-size:12.5px; margin-top:14px; font-family:'JetBrains Mono',monospace; min-height:16px;}
+  .authmsg.err{color:var(--rec);}
+  .authmsg.ok{color:var(--ok);}
+
+  /* ---------- Hero ---------- */
+  .hero{
+    margin-bottom:56px; padding-top:12px;
+    display:grid; grid-template-columns:1.1fr 0.9fr; align-items:center; gap:24px;
+  }
+  @media (max-width:900px){ .hero{grid-template-columns:1fr;} }
+  .eyebrow{
+    font-family:'JetBrains Mono',monospace; font-size:11px;
+    letter-spacing:2px; text-transform:uppercase; color:var(--cyan);
+    margin-bottom:14px;
+    opacity:0; transform:translateY(10px);
+    animation:fadeUp .6s var(--ease-out) .05s both;
+  }
+  .hero h1{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700;
+    font-size:clamp(32px, 4.6vw, 50px);
+    line-height:1.06; margin:0 0 16px; letter-spacing:-0.5px;
+  }
+  .hero h1 .line{
+    display:block; overflow:hidden;
+  }
+  .hero h1 .line span{
+    display:block;
+    opacity:0; transform:translateY(100%);
+    animation:lineReveal .8s var(--ease-out) forwards;
+  }
+  .hero h1 .line:nth-child(2) span{ animation-delay:.16s; background:var(--grad-text); background-size:200% 100%; -webkit-background-clip:text; background-clip:text; color:transparent; animation:lineReveal .8s var(--ease-out) .16s forwards, textSheen 6s linear 1s infinite; }
+  @keyframes lineReveal{ to{opacity:1; transform:translateY(0);} }
+  @keyframes textSheen{ to{ background-position:-200% 0; } }
+  .hero p{
+    color:var(--text-dim); max-width:480px; font-size:15.5px; line-height:1.65; margin:0 0 24px;
+    opacity:0; transform:translateY(10px);
+    animation:fadeUp .6s var(--ease-out) .3s both;
+  }
+  @keyframes fadeUp{ to{opacity:1; transform:translateY(0);} }
+  .hero-cta{
+    display:inline-flex; align-items:center; gap:10px;
+    font-family:'JetBrains Mono',monospace; font-size:12.5px; letter-spacing:0.5px; text-transform:uppercase;
+    color:var(--text); text-decoration:none;
+    padding:12px 18px; border-radius:999px;
+    border:1px solid var(--line-strong);
+    background:var(--surface-raised);
+    opacity:0; transform:translateY(10px);
+    animation:fadeUp .6s var(--ease-out) .46s both;
+    transition:border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+  }
+  .hero-cta:hover{border-color:var(--cyan); box-shadow:var(--glow-cyan); transform:translateY(-2px);}
+  .hero-cta-arrow{display:inline-block; animation:bounce 2s ease-in-out infinite;}
+  @keyframes bounce{ 0%,100%{transform:translateY(0);} 50%{transform:translateY(3px);} }
+
+  .hero-scene{
+    position:relative; aspect-ratio:1/1; max-width:420px; margin:0 auto;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .hero-orb{
+    width:72%; height:72%; border-radius:50%;
+    background:
+      radial-gradient(circle at 32% 28%, rgba(255,255,255,0.5), transparent 40%),
+      conic-gradient(from 0deg, var(--cyan), var(--violet), var(--cyan));
+    filter:blur(0.3px);
+    box-shadow:0 0 90px rgba(0,229,255,0.35), 0 0 140px rgba(138,43,226,0.25), inset 0 0 60px rgba(0,0,0,0.5);
+    animation:orbSpin 16s linear infinite, orbFloat 7s ease-in-out infinite;
+  }
+  .hero-scene::before{
+    content:''; position:absolute; inset:8%; border-radius:50%;
+    border:1px dashed rgba(255,255,255,0.14);
+    animation:orbSpin 30s linear infinite reverse;
+  }
+  @keyframes orbSpin{ to{ transform:rotate(360deg); } }
+  @keyframes orbFloat{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-14px); } }
+
+  /* ---------- Generate panel ---------- */
+  .studio{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:24px;
+    margin-bottom:72px;
+    scroll-margin-top:100px;
+  }
+  @media (max-width: 860px){ .studio{grid-template-columns:1fr;} }
+
+  .panel{
+    background:var(--surface-glass);
+    backdrop-filter:blur(20px) saturate(150%);
+    -webkit-backdrop-filter:blur(20px) saturate(150%);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    padding:26px;
+    position:relative;
+    box-shadow:var(--shadow-soft);
+    transition:border-color .25s ease, box-shadow .25s ease, transform .25s ease;
+  }
+  .panel:hover{border-color:rgba(0,229,255,0.3); box-shadow:var(--shadow-lift), var(--glow-cyan); transform:translateY(-2px);}
+  .panel h3{
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px; letter-spacing:1.5px; text-transform:uppercase;
+    color:var(--text-dim); margin:0 0 20px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .panel h3::before{content:''; width:16px; height:1px; background:var(--grad-primary);}
+
+  .styles{display:flex; flex-wrap:wrap; gap:8px; margin-top:6px;}
+  .style-tag{
+    font-family:'JetBrains Mono',monospace; font-size:11.5px;
+    padding:9px 13px; border-radius:var(--radius-sm); border:1px solid var(--line);
+    background:var(--surface-raised); color:var(--text-dim);
+    cursor:pointer; text-transform:uppercase; letter-spacing:0.5px;
+    transition:all .16s var(--ease);
+    user-select:none;
+  }
+  .style-tag:hover{border-color:var(--line-strong); color:var(--text); transform:translateY(-1px);}
+  .style-tag.selected{background:var(--grad-primary); color:#04141a; border-color:transparent; box-shadow:var(--glow-cyan); font-weight:600;}
+
+  /* ---------- Monitor preview ---------- */
+  .monitor{
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    background:#000;
+    padding:12px;
+    position:relative;
+    transition:box-shadow .3s ease, border-color .3s ease;
+  }
+  .monitor:has(.screen img){
+    border-color:rgba(0,229,255,0.4);
+    box-shadow:var(--glow-cyan);
+  }
+  .monitor .screen{
+    position:relative;
+    width:100%;
+    aspect-ratio:16/9;
+    background:radial-gradient(120% 100% at 50% 0%, #131722, #05060a);
+    border-radius:calc(var(--radius) - 8px);
+    overflow:hidden;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .monitor .screen img{
+    width:100%; height:100%; object-fit:cover; display:block;
+    animation:screenIn .5s var(--ease-out) both;
+  }
+  @keyframes screenIn{
+    from{opacity:0; transform:scale(1.06);}
+    to{opacity:1; transform:scale(1);}
+  }
+  .monitor .screen::after{
+    content:''; position:absolute; inset:0;
+    background:linear-gradient(120deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 30%);
+    mix-blend-mode:overlay; pointer-events:none;
+  }
+  .monitor .placeholder{
+    color:var(--text-faint); font-family:'JetBrains Mono',monospace; font-size:12px;
+    text-align:center; padding:20px; line-height:1.7; letter-spacing:0.3px;
+  }
+  .monitor .placeholder.err{color:var(--rec);}
+  .monitor .recbadge{
+    position:absolute; top:12px; left:12px;
+    display:flex; align-items:center; gap:6px;
+    background:rgba(0,0,0,0.55); backdrop-filter:blur(4px);
+    padding:6px 10px; border-radius:6px;
+    font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:1px;
+    color:#fff;
+    border:1px solid rgba(255,255,255,0.12);
+  }
+  .spinner{
+    width:24px; height:24px; border-radius:50%;
+    border:2px solid rgba(255,255,255,0.12); border-top-color:var(--cyan);
+    animation:spin .8s linear infinite; margin:0 auto 14px;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .meta-row{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-top:14px; padding:0 4px;
+    font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-dim);
+  }
+  .meta-row .dl{color:var(--cyan); cursor:pointer; text-decoration:none; transition:text-shadow .2s ease;}
+  .meta-row .dl:hover{text-decoration:underline; text-shadow:0 0 10px rgba(0,229,255,0.6);}
+
+  /* ---------- Archive / history ---------- */
+  .archive-head{
+    display:flex; align-items:baseline; justify-content:space-between;
+    margin-bottom:22px; padding-bottom:16px; border-bottom:1px solid var(--line);
+  }
+  .archive-head h2{font-family:'Space Grotesk', sans-serif; font-weight:700; font-size:24px; margin:0;}
+  .archive-head span{font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-faint);}
+
+  .reel{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(240px, 1fr));
+    gap:20px;
+  }
+  .reel-card{
+    background:var(--surface-glass);
+    backdrop-filter:blur(16px) saturate(150%);
+    -webkit-backdrop-filter:blur(16px) saturate(150%);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    overflow:hidden;
+    transition:transform .25s var(--ease), border-color .25s ease, box-shadow .25s ease;
+    animation:cardIn .4s var(--ease-out) both;
+  }
+  @keyframes cardIn{
+    from{opacity:0; transform:translateY(10px) scale(0.98);}
+    to{opacity:1; transform:translateY(0) scale(1);}
+  }
+  .reel-card:hover{
+    transform:translateY(-5px) scale(1.015);
+    border-color:rgba(0,229,255,0.35);
+    box-shadow:var(--shadow-lift), var(--glow-cyan);
+  }
+  .reel-card .thumb{
+    width:100%; aspect-ratio:16/9; background:#000;
+    display:flex; align-items:center; justify-content:center;
+    position:relative; overflow:hidden;
+  }
+  .reel-card .thumb img{width:100%; height:100%; object-fit:cover; display:block; transition:transform .4s var(--ease);}
+  .reel-card:hover .thumb img{transform:scale(1.06);}
+  .reel-card .thumb .tc{
+    position:absolute; bottom:7px; right:8px;
+    font-family:'JetBrains Mono',monospace; font-size:9.5px; color:rgba(255,255,255,0.8);
+    background:rgba(0,0,0,0.55); padding:2px 6px; border-radius:4px;
+  }
+  .reel-card .info{padding:13px 15px 15px;}
+  .reel-card .info .title{font-size:13.5px; font-weight:600; margin:0 0 8px; line-height:1.35;
+    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;}
+  .reel-card .info .tags{display:flex; gap:6px; align-items:center;}
+  .tagpill{
+    font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.5px;
+    text-transform:uppercase; color:var(--cyan);
+    border:1px solid var(--line); padding:3px 8px; border-radius:4px;
+    background:rgba(0,229,255,0.06);
+  }
+
+  /* skeleton loading cards while the archive fetches + authenticates images */
+  .skel-card{
+    background:var(--surface-glass); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;
+  }
+  .skel-card .thumb{width:100%; aspect-ratio:16/9; background:linear-gradient(100deg, rgba(255,255,255,0.04) 30%, rgba(255,255,255,0.10) 50%, rgba(255,255,255,0.04) 70%); background-size:200% 100%; animation:shimmer 1.4s infinite;}
+  .skel-card .info{padding:13px 15px 15px;}
+  .skel-line{height:10px; border-radius:3px; background:linear-gradient(100deg, rgba(255,255,255,0.04) 30%, rgba(255,255,255,0.10) 50%, rgba(255,255,255,0.04) 70%); background-size:200% 100%; animation:shimmer 1.4s infinite;}
+  .skel-line.w60{width:60%; margin-top:8px;}
+  @keyframes shimmer{
+    from{background-position:200% 0;}
+    to{background-position:-200% 0;}
+  }
+
+  .empty{
+    text-align:center; padding:64px 20px; color:var(--text-faint);
+    font-family:'JetBrains Mono',monospace; font-size:13px;
+    border:1px dashed var(--line); border-radius:var(--radius);
+    background:var(--surface-glass);
+  }
+
+  .sprockets{
+    display:flex; gap:6px; justify-content:center; margin:56px 0;
+    opacity:0.5;
+  }
+  .sprockets span{width:5px; height:5px; border-radius:50%; background:var(--text-faint);}
+
+  .hidden{display:none !important;}
+  .toast{
+    position:fixed; bottom:24px; right:24px;
+    background:var(--surface-glass-strong);
+    backdrop-filter:blur(16px) saturate(150%);
+    -webkit-backdrop-filter:blur(16px) saturate(150%);
+    border:1px solid var(--line);
+    padding:13px 17px; border-radius:12px;
+    font-family:'JetBrains Mono',monospace; font-size:12.5px;
+    max-width:320px; z-index:150;
+    box-shadow:var(--shadow-lift);
+    animation:toastIn .3s var(--ease-out) both;
+  }
+  @keyframes toastIn{
+    from{opacity:0; transform:translateY(10px) scale(0.97);}
+    to{opacity:1; transform:translateY(0) scale(1);}
+  }
+  .toast.err{border-color:rgba(255,59,92,0.5); color:#ffb4c0; box-shadow:var(--shadow-lift), 0 0 24px rgba(255,59,92,0.15);}
+  .toast.ok{border-color:rgba(0,255,178,0.5); color:#a6ffe0; box-shadow:var(--shadow-lift), 0 0 24px rgba(0,255,178,0.15);}
+</style>
+</head>
+<body>
+
+<!-- decorative / ambient layers — inert, Pass 2 mounts Three.js into #bgScene -->
+<div class="bg-scene" id="bgScene" aria-hidden="true"></div>
+<div class="bg-aurora" aria-hidden="true"></div>
+<div class="bg-grid" aria-hidden="true"></div>
+<div class="cursor-glow" id="cursorGlow" aria-hidden="true"></div>
+<div class="scroll-progress-track" aria-hidden="true"><div class="scroll-progress-bar" id="scrollProgressBar"></div></div>
+
+<div class="shell">
+  <div class="topbar">
+    <div class="logo"><span class="slash">/</span>REEL <span class="logo-sub">— thumbnail studio</span></div>
+    <div class="topbar-right">
+      <div class="airpill"><span class="dot" id="apiDot"></span> <span id="apiStatus">checking api</span></div>
+      <div class="authbox" id="authBox"></div>
+    </div>
+  </div>
+
+  <!-- AUTH VIEW -->
+  <div id="authView" class="hidden">
+    <div class="authpanel">
+      <div class="authtabs">
+        <button class="active" id="tabLogin" onclick="setAuthTab('login')">Sign in</button>
+        <button id="tabRegister" onclick="setAuthTab('register')">Create account</button>
+      </div>
+      <h2 id="authTitle">Sign in</h2>
+      <p class="sub" id="authSub">Enter your credentials to access the studio.</p>
+      <div class="field">
+        <input type="email" id="authEmail" placeholder=" " autocomplete="username" />
+        <label for="authEmail">Email</label>
+      </div>
+      <div class="field">
+        <input type="password" id="authPassword" placeholder=" " autocomplete="current-password" />
+        <label for="authPassword">Password</label>
+      </div>
+      <button class="btn-rec full" id="authSubmit" onclick="submitAuth()">
+        <span class="recdot"></span> <span id="authSubmitLabel">Sign in</span>
+      </button>
+      <div id="authMsg" class="authmsg"></div>
+    </div>
+  </div>
+
+  <!-- APP VIEW -->
+  <div id="appView" class="hidden">
+    <div class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow">// broadcast control</div>
+        <h1>
+          <span class="line"><span>Generate a thumbnail</span></span>
+          <span class="line"><span>that earns the click.</span></span>
+        </h1>
+        <p>Describe the video. Pick a style. The studio builds a prompt, renders the frame, and lays down the title — ready for upload.</p>
+        <a href="#studioPanel" class="hero-cta"><span>Start rendering</span><span class="hero-cta-arrow" aria-hidden="true">↓</span></a>
+      </div>
+      <div class="hero-scene" id="heroScene" aria-hidden="true">
+        <div class="hero-orb"></div>
+      </div>
+    </div>
+
+    <div class="studio" id="studioPanel">
+      <div class="panel">
+        <h3>Take settings</h3>
+        <div class="field">
+          <input type="text" id="fTitle" placeholder=" " />
+          <label for="fTitle">Video title</label>
+        </div>
+        <div class="field">
+          <textarea id="fTopic" rows="3" placeholder=" "></textarea>
+          <label for="fTopic">Topic / scene description</label>
+        </div>
+        <div class="field" style="margin-bottom:6px;">
+          <label style="position:static; display:block; transform:none; margin-bottom:8px; font-size:10px; letter-spacing:1px; text-transform:uppercase; color:var(--text-dim);">Style</label>
+          <div class="styles" id="styleTags"></div>
+        </div>
+        <div class="field">
+          <input type="text" id="fColor" placeholder=" " />
+          <label for="fColor">Color scheme</label>
+        </div>
+        <button class="btn-rec full" style="margin-top:6px;" id="genBtn" onclick="generateThumbnail()">
+          <span class="recdot"></span> <span id="genBtnLabel">Render take</span>
+        </button>
+      </div>
+
+      <div class="panel">
+        <h3>Monitor preview</h3>
+        <div class="monitor">
+          <div class="screen" id="previewScreen">
+            <div class="placeholder">NO SIGNAL<br>Render a take to preview it here</div>
+          </div>
+        </div>
+        <div class="meta-row" id="previewMeta" style="display:none;">
+          <span id="previewMetaText"></span>
+          <a class="dl" id="previewDl" href="#" download>↓ download</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="sprockets">
+      <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span>
+    </div>
+
+    <div class="archive-head">
+      <h2>Archive reel</h2>
+      <span id="archiveCount">0 takes</span>
+    </div>
+    <div id="reel" class="reel"></div>
+    <div id="emptyState" class="empty hidden">No takes yet — your generated thumbnails will appear here.</div>
+  </div>
+</div>
+
+<script>
+  const STYLES = ["dramatic","minimal","gaming","tutorial","vlog","educational"];
+  let API_BASE = localStorage.getItem("reel_api_base") || "http://127.0.0.1:8000";
+  let TOKEN = localStorage.getItem("reel_token") || null;
+  let USER_EMAIL = localStorage.getItem("reel_email") || null;
+  let authMode = "login";
+  let selectedStyle = "tutorial";
+
+  // track blob object URLs so we can revoke them and avoid memory leaks
+  // across refreshes of the archive reel.
+  let activeObjectUrls = [];
+  function releaseObjectUrls(){
+    activeObjectUrls.forEach(u => URL.revokeObjectURL(u));
+    activeObjectUrls = [];
+  }
+
+  function toast(msg, type="ok"){
+    const t = document.createElement("div");
+    t.className = "toast " + type;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(()=>t.remove(), 4200);
+  }
+
+  // ---------- style tags ----------
+  const styleTagsEl = document.getElementById("styleTags");
+  STYLES.forEach(s=>{
+    const b = document.createElement("div");
+    b.className = "style-tag" + (s===selectedStyle ? " selected":"");
+    b.textContent = s;
+    b.onclick = ()=>{
+      selectedStyle = s;
+      document.querySelectorAll(".style-tag").forEach(el=>el.classList.remove("selected"));
+      b.classList.add("selected");
+    };
+    styleTagsEl.appendChild(b);
+  });
+
+  // ---------- API health check ----------
+  async function checkApi(){
+    const dot = document.getElementById("apiDot");
+    const status = document.getElementById("apiStatus");
+    try{
+      const res = await fetch(API_BASE + "/");
+      if(res.ok){
+        dot.classList.add("live");
+        status.textContent = "on air";
+      } else {
+        throw new Error();
+      }
+    }catch(e){
+      dot.classList.remove("live");
+      status.textContent = "api offline";
+    }
+  }
+
+  // ---------- auth view rendering ----------
+  function setAuthTab(mode){
+    authMode = mode;
+    document.getElementById("tabLogin").classList.toggle("active", mode==="login");
+    document.getElementById("tabRegister").classList.toggle("active", mode==="register");
+    document.getElementById("authTitle").textContent = mode==="login" ? "Sign in" : "Create account";
+    document.getElementById("authSub").textContent = mode==="login"
+      ? "Enter your credentials to access the studio."
+      : "Register a new account to start generating.";
+    document.getElementById("authSubmitLabel").textContent = mode==="login" ? "Sign in" : "Create account";
+    document.getElementById("authMsg").textContent = "";
+  }
+
+  async function submitAuth(){
+    const email = document.getElementById("authEmail").value.trim();
+    const password = document.getElementById("authPassword").value;
+    const msgEl = document.getElementById("authMsg");
+    const btn = document.getElementById("authSubmit");
+    msgEl.textContent = "";
+    msgEl.className = "authmsg";
+
+    if(!email || !password){
+      msgEl.textContent = "Email and password are required.";
+      msgEl.classList.add("err");
+      return;
+    }
+
+    btn.disabled = true;
+    try{
+      if(authMode === "register"){
+        const res = await fetch(API_BASE + "/users/", {
+          method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({email, password})
+        });
+        if(!res.ok){
+          const err = await res.json().catch(()=>({}));
+          throw new Error(err.detail || "Registration failed.");
+        }
+        msgEl.textContent = "Account created — signing you in...";
+        msgEl.classList.add("ok");
+        await doLogin(email, password);
+      } else {
+        await doLogin(email, password);
+      }
+    }catch(e){
+      msgEl.textContent = e.message || "Something went wrong.";
+      msgEl.classList.add("err");
+    }finally{
+      btn.disabled = false;
+    }
+  }
+
+  async function doLogin(email, password){
+    const form = new URLSearchParams();
+    form.append("username", email);
+    form.append("password", password);
+    const res = await fetch(API_BASE + "/auth/login", {
+      method:"POST",
+      headers:{"Content-Type":"application/x-www-form-urlencoded"},
+      body: form.toString()
+    });
+    if(!res.ok){
+      const err = await res.json().catch(()=>({}));
+      throw new Error(err.detail || "Invalid credentials.");
+    }
+    const data = await res.json();
+    TOKEN = data.access_token;
+    USER_EMAIL = email;
+    localStorage.setItem("reel_token", TOKEN);
+    localStorage.setItem("reel_email", USER_EMAIL);
+    renderAuthState();
+    loadHistory();
+  }
+
+  function logout(){
+    TOKEN = null;
+    USER_EMAIL = null;
+    localStorage.removeItem("reel_token");
+    localStorage.removeItem("reel_email");
+    releaseObjectUrls();
+    renderAuthState();
+  }
+
+  function renderAuthState(){
+    const authBox = document.getElementById("authBox");
+    const authView = document.getElementById("authView");
+    const appView = document.getElementById("appView");
+    if(TOKEN){
+      authBox.innerHTML = `<span class="who mono">${escapeHtml(USER_EMAIL)}</span><button class="btn-ghost" onclick="logout()">Sign out</button>`;
+      authView.classList.add("hidden");
+      appView.classList.remove("hidden");
+    } else {
+      authBox.innerHTML = "";
+      authView.classList.remove("hidden");
+      appView.classList.add("hidden");
+    }
+  }
+
+  // ---------- authenticated image loading ----------
+  // The API requires a bearer token on GET /thumbnails/{id}, so a plain
+  // <img src="..."> tag always 401s (browsers can't attach headers to it).
+  // Fetch each image manually with the token, then hand the browser a
+  // blob: URL. If the fetch comes back 404 (deleted) or otherwise fails,
+  // resolve to null so the caller can skip rendering that item entirely.
+  async function fetchAuthedImageUrl(id){
+    try{
+      const res = await fetch(API_BASE + "/thumbnails/" + id, {
+        headers:{"Authorization":"Bearer " + TOKEN}
+      });
+      if(!res.ok) return null; // 401 / 404 / 410 → treat as unavailable
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      activeObjectUrls.push(url);
+      return url;
+    }catch(e){
+      return null;
+    }
+  }
+
+  // ---------- generate ----------
+  async function generateThumbnail(){
+    const title = document.getElementById("fTitle").value.trim();
+    const topic = document.getElementById("fTopic").value.trim();
+    const color_scheme = document.getElementById("fColor").value.trim();
+    const btn = document.getElementById("genBtn");
+    const label = document.getElementById("genBtnLabel");
+
+    if(!title || !topic || !color_scheme){
+      toast("Fill in title, topic, and color scheme first.", "err");
+      return;
+    }
+
+    btn.disabled = true;
+    btn.classList.add("loading");
+    label.textContent = "Rendering...";
+
+    document.getElementById("previewScreen").innerHTML =
+      `<div class="placeholder"><div class="spinner"></div>RENDERING<br>Generating base image, then compositing title...</div>`;
+    document.getElementById("previewMeta").style.display = "none";
+
+    try{
+      const res = await fetch(API_BASE + "/thumbnails/", {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "Authorization":"Bearer " + TOKEN
+        },
+        body: JSON.stringify({title, topic, style: selectedStyle, color_scheme})
+      });
+      if(!res.ok){
+        const err = await res.json().catch(()=>({}));
+        throw new Error(err.detail || "Generation failed.");
+      }
+      const data = await res.json();
+      await showPreview(data);
+      toast("Take rendered successfully.", "ok");
+      loadHistory();
+    }catch(e){
+      document.getElementById("previewScreen").innerHTML =
+        `<div class="placeholder err">NO SIGNAL<br>${escapeHtml(e.message || "Render failed.")}</div>`;
+      toast(e.message || "Render failed.", "err");
+    }finally{
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      label.textContent = "Render take";
+    }
+  }
+
+  async function showPreview(item){
+    const imgUrl = await fetchAuthedImageUrl(item.id);
+    if(!imgUrl){
+      document.getElementById("previewScreen").innerHTML =
+        `<div class="placeholder err">NO SIGNAL<br>Take rendered, but the image couldn't be loaded.</div>`;
+      return;
+    }
+    document.getElementById("previewScreen").innerHTML =
+      `<div class="recbadge"><span class="dot live" style="background:#fff;"></span> REC</div>
+       <img src="${imgUrl}" alt="${escapeHtml(item.title)}" />`;
+    const metaEl = document.getElementById("previewMeta");
+    metaEl.style.display = "flex";
+    document.getElementById("previewMetaText").textContent =
+      item.style.toUpperCase() + " · " + item.color_scheme;
+    document.getElementById("previewDl").href = imgUrl;
+    document.getElementById("previewDl").setAttribute("download", "thumbnail_" + item.id + ".jpg");
+  }
+
+  // ---------- history ----------
+  async function loadHistory(){
+    const reel = document.getElementById("reel");
+    const empty = document.getElementById("emptyState");
+    empty.classList.add("hidden");
+
+    // show skeleton placeholders while we fetch the list + authenticate images
+    reel.innerHTML = Array.from({length:4}).map(()=>`
+      <div class="skel-card">
+        <div class="thumb"></div>
+        <div class="info">
+          <div class="skel-line"></div>
+          <div class="skel-line w60"></div>
+        </div>
+      </div>`).join("");
+
+    try{
+      const res = await fetch(API_BASE + "/thumbnails/", {
+        headers:{"Authorization":"Bearer " + TOKEN}
+      });
+      if(!res.ok) throw new Error();
+      const items = await res.json();
+      await renderReel(items);
+    }catch(e){
+      reel.innerHTML = "";
+      document.getElementById("archiveCount").textContent = "0 takes";
+      empty.textContent = "Couldn't load the archive — check that the API is running.";
+      empty.classList.remove("hidden");
+    }
+  }
+
+  async function renderReel(items){
+    const reel = document.getElementById("reel");
+    const empty = document.getElementById("emptyState");
+
+    // release any blob URLs from the previous render before making new ones
+    releaseObjectUrls();
+
+    const ordered = items.slice().reverse();
+
+    // resolve every thumbnail's image in parallel; any item whose image
+    // 404s (i.e. was deleted server-side) resolves to null and is dropped
+    // from the reel entirely, so deleted takes never render as broken cards.
+    const resolved = await Promise.all(ordered.map(async item=>{
+      const imgUrl = await fetchAuthedImageUrl(item.id);
+      return imgUrl ? {item, imgUrl} : null;
+    }));
+    const visible = resolved.filter(Boolean);
+
+    document.getElementById("archiveCount").textContent =
+      visible.length + (visible.length===1 ? " take" : " takes");
+
+    if(visible.length === 0){
+      reel.innerHTML = "";
+      empty.textContent = "No takes yet — your generated thumbnails will appear here.";
+      empty.classList.remove("hidden");
+      return;
+    }
+    empty.classList.add("hidden");
+
+    reel.innerHTML = visible.map(({item, imgUrl})=>{
+      const date = new Date(item.created_at);
+      const tc = isNaN(date) ? "" : date.toLocaleDateString(undefined, {month:"short", day:"2-digit"});
+      return `
+        <div class="reel-card">
+          <a href="${imgUrl}" download="thumbnail_${item.id}.jpg" style="text-decoration:none; color:inherit;">
+            <div class="thumb">
+              <img src="${imgUrl}" alt="${escapeHtml(item.title)}" />
+              <span class="tc">${tc}</span>
+            </div>
+          </a>
+          <div class="info">
+            <p class="title">${escapeHtml(item.title)}</p>
+            <div class="tags">
+              <span class="tagpill">${escapeHtml(item.style)}</span>
+            </div>
+          </div>
+        </div>`;
+    }).join("");
+  }
+
+  function escapeHtml(str){
+    const div = document.createElement("div");
+    div.textContent = str == null ? "" : String(str);
+    return div.innerHTML;
+  }
+
+  // ---------- init ----------
+  setAuthTab("login");
+  renderAuthState();
+  checkApi();
+  if(TOKEN) loadHistory();
+</script>
+
+<script>
+  // ============================================================
+  // VISUAL ENHANCEMENT LAYER — Pass 1
+  // Purely decorative. Reads no application state, mutates no
+  // application state. Safe to delete without touching REEL's
+  // functionality. Later passes (Three.js / GSAP / Lenis) will
+  // extend this block, then everything gets split into its own
+  // js/experience.js file in the final pass.
+  // ============================================================
+
+  // ---- sticky navbar shadow + scroll progress bar ----
+  const scrollBar = document.getElementById("scrollProgressBar");
+  function onScroll(){
+    const h = document.documentElement;
+    const scrolled = h.scrollTop;
+    const height = h.scrollHeight - h.clientHeight;
+    const pct = height > 0 ? (scrolled / height) * 100 : 0;
+    if(scrollBar) scrollBar.style.width = pct + "%";
+    document.body.classList.toggle("is-scrolled", scrolled > 8);
+  }
+  document.addEventListener("scroll", onScroll, {passive:true});
+  onScroll();
+
+  // ---- cursor glow, desktop pointer devices only ----
+  const cursorGlow = document.getElementById("cursorGlow");
+  if(cursorGlow && window.matchMedia("(hover: hover) and (pointer: fine)").matches){
+    window.addEventListener("pointermove", (e)=>{
+      cursorGlow.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`;
+    }, {passive:true});
+  }
+
+  // ---- ripple feedback on any button press (event delegation —
+  // does not attach to or replace any existing onclick handler) ----
+  document.addEventListener("click", (e)=>{
+    const btn = e.target.closest("button");
+    if(!btn) return;
+    const rect = btn.getBoundingClientRect();
+    const ripple = document.createElement("span");
+    ripple.className = "ripple";
+    ripple.style.left = (e.clientX - rect.left) + "px";
+    ripple.style.top = (e.clientY - rect.top) + "px";
+    btn.appendChild(ripple);
+    ripple.addEventListener("animationend", ()=>ripple.remove());
+  });
+</script>
+</body>
+</html>
